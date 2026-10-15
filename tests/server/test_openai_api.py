@@ -4,6 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from freetoken.message import TokenizeMsg, UserReply
@@ -356,14 +357,36 @@ def test_completion_rejects_token_id_prompts():
     assert "token-id prompt" in body["error"]["message"]
 
 
-def test_completion_accepts_text_prompt():
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("n", [0, -1, 2, 3])
+def test_completion_rejects_unsupported_n_before_submission(n, stream):
+    state = FakeState([])
+    response = run(
+        handle_completion(
+            CompletionRequest(model="client-model", prompt="say hi", n=n, stream=stream),
+            request=None,
+            state=state,
+            model_sampling={},
+        )
+    )
+
+    assert response.status_code == 400
+    error = json.loads(response.body)["error"]
+    assert error["type"] == "invalid_request_error"
+    assert error["param"] == "n"
+    assert error["message"] == "Only n=1 is supported"
+    assert state.sent is None
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"n": 1}])
+def test_completion_accepts_text_prompt(kwargs):
     state = FakeState(
         [UserReply(uid=42, incremental_output="hello", finished=True, prompt_tokens_delta=2, completion_tokens_delta=1)]
     )
 
     response = run(
         handle_completion(
-            CompletionRequest(model="client-model", prompt="say hi"),
+            CompletionRequest(model="client-model", prompt="say hi", **kwargs),
             request=None,
             state=state,
             model_sampling={},
